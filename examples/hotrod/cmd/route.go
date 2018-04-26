@@ -32,13 +32,14 @@ var routeCmd = &cobra.Command{
 	Short: "Starts Route service",
 	Long:  `Starts Route service.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := log.NewFactory(logger.With(zap.String("service", "route")))
+		zapLogger := logger.With(zap.String("service", "route"))
+		logger := log.NewFactory(zapLogger)
 		server := route.NewServer(
 			net.JoinHostPort(routeOptions.serverInterface, strconv.Itoa(routeOptions.serverPort)),
 			tracing.Init("route", metricsFactory.Namespace("route", nil), logger, jAgentHostPort),
 			logger,
 		)
-		return server.Run()
+		return logError(zapLogger, server.Run())
 	},
 }
 
@@ -52,6 +53,6 @@ var (
 func init() {
 	RootCmd.AddCommand(routeCmd)
 
-	routeCmd.Flags().StringVarP(&routeOptions.serverInterface, "bind", "", "127.0.0.1", "interface to which the Route server will bind")
+	routeCmd.Flags().StringVarP(&routeOptions.serverInterface, "bind", "", "0.0.0.0", "interface to which the Route server will bind")
 	routeCmd.Flags().IntVarP(&routeOptions.serverPort, "port", "p", 8083, "port on which the Route server will listen")
 }

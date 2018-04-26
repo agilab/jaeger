@@ -1,5 +1,6 @@
 PROJECT_ROOT=github.com/jaegertracing/jaeger
 TOP_PKGS := $(shell glide novendor | grep -v -e ./thrift-gen/... -e swagger-gen... -e ./examples/... -e ./scripts/...)
+STORAGE_PKGS = ./plugin/storage/integration/...
 
 # all .go files that don't exist in hidden directories
 ALL_SRC := $(shell find . -name "*.go" | grep -v -e vendor -e thrift-gen -e swagger-gen -e examples -e doc.go \
@@ -77,7 +78,7 @@ integration-test: go-gen
 
 .PHONY: storage-integration-test
 storage-integration-test: go-gen
-	$(GOTEST) ./plugin/storage/integration/...
+	bash -c "set -e; set -o pipefail; $(GOTEST) $(STORAGE_PKGS) | $(COLORIZE)"
 
 all-pkgs:
 	@echo $(ALL_PKGS) | tr ' ' '\n' | sort
@@ -122,9 +123,20 @@ install-glide:
 install: install-glide
 	glide install
 
+.PHONY: install-go-bindata
+install-go-bindata:
+	go get github.com/jteeuwen/go-bindata/...
+	go get github.com/elazarl/go-bindata-assetfs/...
+
 .PHONY: build-examples
-build-examples:
-	go build -o ./examples/hotrod/hotrod-demo ./examples/hotrod/main.go
+build-examples: install-go-bindata
+	(cd ./examples/hotrod/services/frontend/ && go-bindata-assetfs -pkg frontend web_assets/...)
+	rm ./examples/hotrod/services/frontend/bindata.go
+	CGO_ENABLED=0 GOOS=linux installsuffix=cgo go build -o ./examples/hotrod/hotrod-linux ./examples/hotrod/main.go
+
+.PHONE: docker-hotrod
+docker-hotrod: build-examples
+	docker build -t $(DOCKER_NAMESPACE)/example-hotrod:${DOCKER_TAG} ./examples/hotrod
 
 .PHONY: build_ui
 build_ui:
@@ -134,33 +146,51 @@ build_ui:
 
 .PHONY: build-all-in-one-linux
 build-all-in-one-linux: build_ui
-	CGO_ENABLED=0 GOOS=linux installsuffix=cgo go build -o ./cmd/standalone/standalone-linux $(BUILD_INFO) ./cmd/standalone/main.go
+	GOOS=linux $(MAKE) build-all-in-one
 
-.PHONY: build-agent-linux
-build-agent-linux:
-	CGO_ENABLED=0 GOOS=linux installsuffix=cgo go build -o ./cmd/agent/agent-linux $(BUILD_INFO) ./cmd/agent/main.go
+.PHONY: build-all-in-one
+build-all-in-one:
+	CGO_ENABLED=0 installsuffix=cgo go build -o ./cmd/standalone/standalone-$(GOOS) $(BUILD_INFO) ./cmd/standalone/main.go
 
-.PHONY: build-query-linux
-build-query-linux:
-	CGO_ENABLED=0 GOOS=linux installsuffix=cgo go build -o ./cmd/query/query-linux $(BUILD_INFO) ./cmd/query/main.go
+.PHONY: build-agent
+build-agent:
+	CGO_ENABLED=0 installsuffix=cgo go build -o ./cmd/agent/agent-$(GOOS) $(BUILD_INFO) ./cmd/agent/main.go
 
-.PHONY: build-collector-linux
-build-collector-linux:
-	CGO_ENABLED=0 GOOS=linux installsuffix=cgo go build -o ./cmd/collector/collector-linux $(BUILD_INFO) ./cmd/collector/main.go
+.PHONY: build-query
+build-query:
+	CGO_ENABLED=0 installsuffix=cgo go build -o ./cmd/query/query-$(GOOS) $(BUILD_INFO) ./cmd/query/main.go
+
+.PHONY: build-collector
+build-collector:
+	CGO_ENABLED=0 installsuffix=cgo go build -o ./cmd/collector/collector-$(GOOS) $(BUILD_INFO) ./cmd/collector/main.go
 
 .PHONY: docker-no-ui
-docker-no-ui: build-agent-linux build-collector-linux build-query-linux build-crossdock-linux
+docker-no-ui: build-binaries-linux build-crossdock-linux
 	mkdir -p jaeger-ui-build/build/
 	make docker-images-only
 
 .PHONY: docker
 docker: build_ui docker-no-ui
 
+.PHONY: build-binaries-linux
+build-binaries-linux:
+	GOOS=linux $(MAKE) build-agent build-collector build-query build-all-in-one
+
+.PHONY: build-binaries-windows
+build-binaries-windows:
+	GOOS=windows $(MAKE) build-agent build-collector build-query build-all-in-one
+
+.PHONY: build-binaries-darwin
+build-binaries-darwin:
+	GOOS=darwin $(MAKE) build-agent build-collector build-query build-all-in-one
+
 .PHONY: docker-images-only
 docker-images-only:
 	cp -r jaeger-ui-build/build/ cmd/query/jaeger-ui-build
 	docker build -t $(DOCKER_NAMESPACE)/jaeger-cassandra-schema:${DOCKER_TAG} plugin/storage/cassandra/
 	@echo "Finished building jaeger-cassandra-schema =============="
+	docker build -t $(DOCKER_NAMESPACE)/jaeger-es-index-cleaner:${DOCKER_TAG} plugin/storage/es
+	@echo "Finished building jaeger-es-indices-clean =============="
 	for component in agent collector query ; do \
 		docker build -t $(DOCKER_NAMESPACE)/jaeger-$$component:${DOCKER_TAG} cmd/$$component ; \
 		echo "Finished building $$component ==============" ; \
@@ -177,7 +207,7 @@ docker-push:
 	if [ $$CONFIRM != "y" ] && [ $$CONFIRM != "Y" ]; then \
 		echo "Exiting." ; exit 1 ; \
 	fi
-	for component in agent cassandra-schema collector query ; do \
+	for component in agent cassandra-schema es-index-cleaner collector query example-hotrod; do \
 		docker push $(DOCKER_NAMESPACE)/jaeger-$$component ; \
 	done
 
@@ -249,3 +279,7 @@ install-mockery:
 .PHONY: generate-mocks
 generate-mocks: install-mockery
 	$(MOCKERY) -all -dir ./pkg/es/ -output ./pkg/es/mocks && rm pkg/es/mocks/ClientBuilder.go
+
+.PHONY: echo-version
+echo-version:
+	@echo $(GIT_CLOSEST_TAG)

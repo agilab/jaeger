@@ -20,11 +20,11 @@ import (
 	"flag"
 	"net/http"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 	"github.com/uber/jaeger-lib/metrics"
-	xkit "github.com/uber/jaeger-lib/metrics/go-kit"
-	kitexpvar "github.com/uber/jaeger-lib/metrics/go-kit/expvar"
+	jexpvar "github.com/uber/jaeger-lib/metrics/expvar"
 	jprom "github.com/uber/jaeger-lib/metrics/prometheus"
 )
 
@@ -68,12 +68,12 @@ func (b *Builder) InitFromViper(v *viper.Viper) *Builder {
 // can be later added by RegisterHandler function.
 func (b *Builder) CreateMetricsFactory(namespace string) (metrics.Factory, error) {
 	if b.Backend == "prometheus" {
-		metricsFactory := jprom.New()
-		b.handler = promhttp.Handler()
+		metricsFactory := jprom.New().Namespace(namespace, nil)
+		b.handler = promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{DisableCompression: true})
 		return metricsFactory, nil
 	}
 	if b.Backend == "expvar" {
-		metricsFactory := xkit.Wrap(namespace, kitexpvar.NewFactory(10))
+		metricsFactory := jexpvar.NewFactory(10).Namespace(namespace, nil)
 		b.handler = expvar.Handler()
 		return metricsFactory, nil
 	}

@@ -24,7 +24,6 @@ import (
 	"syscall"
 
 	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	jaegerClientConfig "github.com/uber/jaeger-client-go/config"
@@ -109,7 +108,6 @@ func main() {
 			}
 
 			apiHandlerOptions := []app.HandlerOption{
-				app.HandlerOptions.Prefix(queryOpts.Prefix),
 				app.HandlerOptions.Logger(logger),
 				app.HandlerOptions.Tracer(tracer),
 			}
@@ -118,9 +116,12 @@ func main() {
 				spanReader,
 				dependencyReader,
 				apiHandlerOptions...)
-			r := mux.NewRouter()
+			r := app.NewRouter()
+			if queryOpts.BasePath != "/" {
+				r = r.PathPrefix(queryOpts.BasePath).Subrouter()
+			}
 			apiHandler.RegisterRoutes(r)
-			registerStaticHandler(r, logger, queryOpts)
+			app.RegisterStaticHandler(r, logger, queryOpts)
 
 			if h := mBldr.Handler(); h != nil {
 				logger.Info("Registering metrics handler with HTTP server", zap.String("route", mBldr.HTTPRoute))
@@ -168,29 +169,24 @@ func main() {
 	}
 }
 
-func registerStaticHandler(r *mux.Router, logger *zap.Logger, qOpts *app.QueryOptions) {
-	staticHandler, err := app.NewStaticAssetsHandler(qOpts.StaticAssets, qOpts.UIConfig)
-	if err != nil {
-		logger.Fatal("Could not create static assets handler", zap.Error(err))
-	}
-	if staticHandler != nil {
-		staticHandler.RegisterRoutes(r)
-	} else {
-		logger.Info("Static handler is not registered")
-	}
-}
-
 func archiveOptions(storageFactory istorage.Factory, logger *zap.Logger) []app.HandlerOption {
-	reader, err := storageFactory.CreateSpanReader()
+	archiveFactory, ok := storageFactory.(istorage.ArchiveFactory)
+	if !ok {
+		logger.Info("Archive storage not supported by the factory")
+		return nil
+	}
+	reader, err := archiveFactory.CreateArchiveSpanReader()
 	if err == istorage.ErrArchiveStorageNotConfigured || err == istorage.ErrArchiveStorageNotSupported {
+		logger.Info("Archive storage not created", zap.String("reason", err.Error()))
 		return nil
 	}
 	if err != nil {
 		logger.Error("Cannot init archive storage reader", zap.Error(err))
 		return nil
 	}
-	writer, err := storageFactory.CreateSpanWriter()
+	writer, err := archiveFactory.CreateArchiveSpanWriter()
 	if err == istorage.ErrArchiveStorageNotConfigured || err == istorage.ErrArchiveStorageNotSupported {
+		logger.Info("Archive storage not created", zap.String("reason", err.Error()))
 		return nil
 	}
 	if err != nil {
