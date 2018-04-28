@@ -51,4 +51,6 @@ type TraceQueryParameters struct {
 	NumTraces     int
 	Offset        int
 	Lazy          int // only return spans
+	RequestMeta   string
+	RequestBody   string
 }

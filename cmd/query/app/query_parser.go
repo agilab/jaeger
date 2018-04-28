@@ -41,8 +41,10 @@ const (
 	serviceParam     = "service"
 	endTimeParam     = "end"
 	prettyPrintParam = "prettyPrint"
-	offset           = "offset"
-	lazy             = "lazy"
+	offsetParam      = "offset"
+	lazyParam        = "lazy"
+	requestMetaParam = "requestMetaParam"
+	requestBodyParam = "requestBodyParam"
 )
 
 var (
@@ -82,6 +84,8 @@ type traceQueryParameters struct {
 func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 	service := r.FormValue(serviceParam)
 	operation := r.FormValue(operationParam)
+	requestMeta := r.FormValue(requestMetaParam)
+	requestBody := r.FormValue(requestBodyParam)
 
 	startTime, err := p.parseTime(startTimeParam, r)
 	if err != nil {
@@ -117,11 +121,11 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 		return nil, err
 	}
 
-	offset, err := p.parseInt(offset, r, 0)
+	offset, err := p.parseInt(offsetParam, r, 0)
 	if err != nil {
 		return nil, err
 	}
-	lazy, err := p.parseInt(lazy, r, 1)
+	lazy, err := p.parseInt(lazyParam, r, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +151,8 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 			DurationMax:   maxDuration,
 			Offset:        offset,
 			Lazy:          lazy,
+			RequestMeta:   requestMeta,
+			RequestBody:   requestBody,
 		},
 		traceIDs: traceIDs,
 	}
