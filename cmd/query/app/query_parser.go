@@ -121,7 +121,7 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 	if err != nil {
 		return nil, err
 	}
-	lazy, err := p.parseInt(lazy, r, 0)
+	lazy, err := p.parseInt(lazy, r, 1)
 	if err != nil {
 		return nil, err
 	}
