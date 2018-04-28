@@ -49,6 +49,8 @@ const (
 	logFieldsField     = "logs.fields"
 	tagKeyField        = "key"
 	tagValueField      = "value"
+	requestMetaField   = "request_meta"
+	requestBodyField   = "request_body"
 
 	defaultDocCount  = 10000 // the default elasticsearch allowed limit
 	defaultNumTraces = 100
@@ -572,6 +574,15 @@ func (s *SpanReader) buildFindTraceIDsQuery(traceQuery *spanstore.TraceQueryPara
 		operationNameQuery := s.buildOperationNameQuery(traceQuery.OperationName)
 		boolQuery.Must(operationNameQuery)
 	}
+	if traceQuery.RequestMeta != "" {
+		requestMetaQuery := s.buildRequestMetaQuery(traceQuery.RequestMeta)
+		boolQuery.Must(requestMetaQuery)
+	}
+
+	if traceQuery.RequestMeta != "" {
+		requestBodyQuery := s.buildRequestBodyQuery(traceQuery.RequestBody)
+		boolQuery.Must(requestBodyQuery)
+	}
 
 	for k, v := range traceQuery.Tags {
 		tagQuery := s.buildTagQuery(k, v)
@@ -597,6 +608,13 @@ func (s *SpanReader) buildStartTimeQuery(startTimeMin time.Time, startTimeMax ti
 
 func (s *SpanReader) buildServiceNameQuery(serviceName string) elastic.Query {
 	return elastic.NewMatchQuery(serviceNameField, serviceName)
+}
+
+func (s *SpanReader) buildRequestMetaQuery(requestMeta string) elastic.Query {
+	return elastic.NewMatchQuery(requestMetaField, requestMeta)
+}
+func (s *SpanReader) buildRequestBodyQuery(requestBody string) elastic.Query {
+	return elastic.NewMatchQuery(requestBodyField, requestBody)
 }
 
 func (s *SpanReader) buildOperationNameQuery(operationName string) elastic.Query {
