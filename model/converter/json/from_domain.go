@@ -69,7 +69,7 @@ func (fd fromDomain) convertSpanInternal(span *model.Span) json.Span {
 		StartTime:     model.TimeAsEpochMicroseconds(span.StartTime),
 		Duration:      model.DurationAsMicroseconds(span.Duration),
 		Tags:          fd.convertKeyValuesFunc(span.Tags),
-		Logs:          fd.convertLogs(span.Logs),
+		Logs:          fd.convertLogs(span),
 	}
 }
 
@@ -164,12 +164,26 @@ func (fd fromDomain) convertKeyValuesString(keyValues model.KeyValues) []json.Ke
 	return out
 }
 
-func (fd fromDomain) convertLogs(logs []model.Log) []json.Log {
-	out := make([]json.Log, len(logs))
-	for i, log := range logs {
-		out[i] = json.Log{
-			Timestamp: model.TimeAsEpochMicroseconds(log.Timestamp),
-			Fields:    fd.convertKeyValuesFunc(log.Fields),
+func (fd fromDomain) convertLogs(span *model.Span) []json.Log {
+	out := make([]json.Log, len(span.Logs))
+	for i, log := range span.Logs {
+		if (log.Fields[0].Key == "request.meta" && span.RequestMeta != "") ||
+			(log.Fields[0].Key == "request.body" && span.RequestBody != "") {
+			out[i] = json.Log{
+				Timestamp: model.TimeAsEpochMicroseconds(log.Timestamp),
+				Fields: []json.KeyValue{
+					{
+						Key:   log.Fields[0].Key,
+						Type:  json.StringType,
+						Value: span.RequestMeta,
+					},
+				},
+			}
+		} else {
+			out[i] = json.Log{
+				Timestamp: model.TimeAsEpochMicroseconds(log.Timestamp),
+				Fields:    fd.convertKeyValuesFunc(log.Fields),
+			}
 		}
 	}
 	return out

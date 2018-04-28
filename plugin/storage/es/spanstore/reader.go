@@ -39,6 +39,7 @@ const (
 	traceIDAggregation = "traceIDs"
 
 	traceIDField       = "traceID"
+	spanIDField        = "spanID"
 	durationField      = "duration"
 	startTimeField     = "startTime"
 	serviceNameField   = "process.serviceName"
@@ -197,11 +198,107 @@ func (s *SpanReader) FindTraces(traceQuery *spanstore.TraceQueryParameters) ([]*
 	if traceQuery.NumTraces == 0 {
 		traceQuery.NumTraces = defaultNumTraces
 	}
-	uniqueTraceIDs, err := s.findTraceIDs(traceQuery)
-	if err != nil {
-		return nil, err
+	if traceQuery.Lazy == 0 {
+		uniqueTraceIDs, err := s.findTraceIDs(traceQuery)
+		if err != nil {
+			return nil, err
+		}
+		return s.multiRead(uniqueTraceIDs, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
+	} else {
+		spans, err := s.findSpans(traceQuery)
+		if err != nil {
+			return nil, err
+		}
+		return s.multiReadSpans(spans, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
 	}
-	return s.multiRead(uniqueTraceIDs, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
+}
+
+func (s *SpanReader) multiReadSpans(spans []*model.Span, startTime, endTime time.Time) ([]*model.Trace, error) {
+	if len(spans) == 0 {
+		return []*model.Trace{}, nil
+	}
+	searchRequests := make([]*elastic.SearchRequest, len(spans))
+
+	var traces []*model.Trace
+	// Add an hour in both directions so that traces that straddle two indexes are retrieved.
+	// i.e starts in one and ends in another.
+	indices := findIndices(spanIndexPrefix, startTime.Add(-time.Hour), endTime.Add(time.Hour))
+
+	tracesMap := make(map[string]*model.Trace)
+	first := true
+	for {
+		if spans == nil || len(spans) == 0 {
+			break
+		}
+
+		for i, span := range spans {
+			if first {
+				query := elastic.NewBoolQuery().Must(elastic.NewTermQuery("parentSpanID", span.ParentSpanID),
+					elastic.NewRangeQuery("startTimeMillis").Lte(span.StartTime.Unix()*1000))
+				searchRequests[i] = elastic.NewSearchRequest().IgnoreUnavailable(true).
+					Type("span").Source(elastic.NewSearchSource().Query(query).Size(10).
+					Sort("startTime", true))
+			} else {
+				query := elastic.NewTermQuery("spanID", span.ParentSpanID)
+				searchRequests[i] = elastic.NewSearchRequest().IgnoreUnavailable(true).
+					Type("span").Source(elastic.NewSearchSource().Query(query).Size(1))
+			}
+		}
+
+		results, err := s.client.MultiSearch().Add(searchRequests...).Index(indices...).Do(s.ctx)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if results.Responses == nil || len(results.Responses) == 0 {
+			break
+		}
+
+		spans = nil
+
+		for _, result := range results.Responses {
+			if result.Hits == nil || len(result.Hits.Hits) == 0 {
+				continue
+			}
+
+			fetchSpans, err := s.collectSpans(result.Hits.Hits)
+			if err != nil {
+				return nil, err
+			}
+			if len(fetchSpans) == 0 {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+
+			lastSpan := spans[len(spans)-1]
+			lastSpanTraceID := lastSpan.TraceID.String()
+			if first && len(result.Hits.Hits) > 10 {
+				spans[0].Warnings = append(spans[0].Warnings, "unfinished")
+				lastSpan.Warnings = append(lastSpan.Warnings, "unfinished")
+			}
+
+			if traceSpan, ok := tracesMap[lastSpanTraceID]; ok {
+				for _, span := range spans {
+					traceSpan.Spans = append(traceSpan.Spans, span)
+				}
+			} else {
+				tracesMap[lastSpanTraceID] = &model.Trace{Spans: spans}
+			}
+
+			if lastSpan.TraceID.String() != lastSpan.SpanID.String() {
+				spans = append(spans, lastSpan)
+			}
+		}
+		first = false
+	}
+
+	for _, trace := range tracesMap {
+		traces = append(traces, trace)
+	}
+	return traces, nil
 }
 
 func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time) ([]*model.Trace, error) {
@@ -283,7 +380,7 @@ func validateQuery(p *spanstore.TraceQueryParameters) error {
 	if p == nil {
 		return ErrMalformedRequestObject
 	}
-	if p.ServiceName == "" && len(p.Tags) > 0 {
+	if p.ServiceName == "" && len(p.Tags) > 0 && p.OperationName == "" {
 		return ErrServiceNameNotSet
 	}
 	if p.StartTimeMin.IsZero() || p.StartTimeMax.IsZero() {
@@ -370,6 +467,72 @@ func (s *SpanReader) findTraceIDs(traceQuery *spanstore.TraceQueryParameters) ([
 
 	traceIDBuckets := bucket.Buckets
 	return bucketToStringArray(traceIDBuckets)
+}
+
+func (s *SpanReader) findSpans(traceQuery *spanstore.TraceQueryParameters) ([]*model.Span, error) {
+	//  Below is the JSON body to our HTTP GET request to ElasticSearch. This function creates this.
+	// {
+	//      "size": 0,
+	//      "source":{
+	//      "query": {
+	//        "bool": {
+	//          "must": [
+	//            { "match": { "operationName":   "op1"      }},
+	//            { "match": { "process.serviceName": "service1" }},
+	//            { "range":  { "startTime": { "gte": 0, "lte": 90000000000000000 }}},
+	//            { "range":  { "duration": { "gte": 0, "lte": 90000000000000000 }}},
+	//            { "should": [
+	//                   { "nested" : {
+	//                      "path" : "tags",
+	//                      "query" : {
+	//                          "bool" : {
+	//                              "must" : [
+	//                              { "match" : {"tags.key" : "tag3"} },
+	//                              { "match" : {"tags.value" : "xyz"} }
+	//                              ]
+	//                          }}}},
+	//                   { "nested" : {
+	//                          "path" : "process.tags",
+	//                          "query" : {
+	//                              "bool" : {
+	//                                  "must" : [
+	//                                  { "match" : {"tags.key" : "tag3"} },
+	//                                  { "match" : {"tags.value" : "xyz"} }
+	//                                  ]
+	//                              }}}},
+	//                   { "nested" : {
+	//                          "path" : "logs.fields",
+	//                          "query" : {
+	//                              "bool" : {
+	//                                  "must" : [
+	//                                  { "match" : {"tags.key" : "tag3"} },
+	//                                  { "match" : {"tags.value" : "xyz"} }
+	//                                  ]
+	//                              }}}}
+	//                ]
+	//              }
+	//          ]
+	//        }
+	//      },
+	//      "aggs": { "traceIDs" : { "terms" : {"size": 100,"field": "traceID" }}}
+	//  }
+	aggregation := elastic.NewFetchSourceContext(true)
+	boolQuery := s.buildFindTraceIDsQuery(traceQuery)
+
+	jaegerIndices := findIndices(spanIndexPrefix, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
+
+	searchService := s.client.Search(jaegerIndices...).
+		Type(spanType).
+		Size(0). // set to 0 because we don't want actual documents.
+		Aggregation(traceIDAggregation, aggregation).
+		IgnoreUnavailable(true).
+		Query(boolQuery)
+
+	searchResult, err := searchService.Do(s.ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "Search service failed")
+	}
+	return s.collectSpans(searchResult.Hits.Hits)
 }
 
 func (s *SpanReader) buildTraceIDAggregation(numOfTraces int) elastic.Aggregation {

@@ -49,4 +49,6 @@ type TraceQueryParameters struct {
 	DurationMin   time.Duration
 	DurationMax   time.Duration
 	NumTraces     int
+	Offset        int
+	Lazy          int // only return spans
 }

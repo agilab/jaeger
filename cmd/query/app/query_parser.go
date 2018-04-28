@@ -41,6 +41,8 @@ const (
 	serviceParam     = "service"
 	endTimeParam     = "end"
 	prettyPrintParam = "prettyPrint"
+	offset           = "offset"
+	lazy             = "lazy"
 )
 
 var (
@@ -95,14 +97,9 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 		return nil, err
 	}
 
-	limitParam := r.FormValue(limitParam)
-	limit := defaultQueryLimit
-	if limitParam != "" {
-		limitParsed, err := strconv.ParseInt(limitParam, 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		limit = int(limitParsed)
+	limit, err := p.parseInt(limitParam, r, defaultQueryLimit)
+	if err != nil {
+		return nil, err
 	}
 
 	minDuration, err := p.parseDuration(minDurationParam, r)
@@ -116,6 +113,15 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 	}
 
 	maxDuration, err := p.parseDuration(maxDurationParam, r)
+	if err != nil {
+		return nil, err
+	}
+
+	offset, err := p.parseInt(offset, r, 0)
+	if err != nil {
+		return nil, err
+	}
+	lazy, err := p.parseInt(lazy, r, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +145,8 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 			NumTraces:     limit,
 			DurationMin:   minDuration,
 			DurationMax:   maxDuration,
+			Offset:        offset,
+			Lazy:          lazy,
 		},
 		traceIDs: traceIDs,
 	}
@@ -147,6 +155,19 @@ func (p *queryParser) parse(r *http.Request) (*traceQueryParameters, error) {
 		return nil, err
 	}
 	return traceQuery, nil
+}
+
+func (p *queryParser) parseInt(param string, r *http.Request, defaultNum int) (int, error) {
+	intParam := r.FormValue(param)
+	intNum := defaultNum
+	if intParam != "" {
+		limitParsed, err := strconv.ParseInt(intParam, 10, 32)
+		if err != nil {
+			return 0, err
+		}
+		intNum = int(limitParsed)
+	}
+	return intNum, nil
 }
 
 func (p *queryParser) parseTime(param string, r *http.Request) (time.Time, error) {
@@ -177,7 +198,7 @@ func (p *queryParser) parseDuration(durationParam string, r *http.Request) (time
 }
 
 func (p *queryParser) validateQuery(traceQuery *traceQueryParameters) error {
-	if len(traceQuery.traceIDs) == 0 && traceQuery.ServiceName == "" {
+	if len(traceQuery.traceIDs) == 0 && traceQuery.ServiceName == "" && traceQuery.OperationName == "" {
 		return ErrServiceParameterRequired
 	}
 	if traceQuery.DurationMin != 0 && traceQuery.DurationMax != 0 {

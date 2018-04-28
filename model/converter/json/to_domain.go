@@ -37,7 +37,7 @@ func (td toDomain) spanToDomain(dbSpan *json.Span) (*model.Span, error) {
 	if err != nil {
 		return nil, err
 	}
-	logs, err := td.convertLogs(dbSpan.Logs)
+	logs, requestMeta, requestBody, err := td.convertLogs(dbSpan)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +75,8 @@ func (td toDomain) spanToDomain(dbSpan *json.Span) (*model.Span, error) {
 		Tags:          tags,
 		Logs:          logs,
 		Process:       process,
+		RequestMeta:   requestMeta,
+		RequestBody:   requestBody,
 	}
 	return span, nil
 }
@@ -164,19 +166,28 @@ func (td toDomain) convertKeyValueOfType(tag *json.KeyValue, vType model.ValueTy
 	return model.KeyValue{}, fmt.Errorf("not a valid ValueType string %s", vType.String())
 }
 
-func (td toDomain) convertLogs(logs []json.Log) ([]model.Log, error) {
-	retMe := make([]model.Log, len(logs))
-	for i, l := range logs {
+func (td toDomain) convertLogs(span *json.Span) ([]model.Log, string, string, error) {
+	requestMeta, requestBody := "", ""
+	retMe := make([]model.Log, len(span.Logs))
+	for i, l := range span.Logs {
+		if l.Fields[0].Key == "request.meta" && l.Fields[0].Type == json.StringType {
+			requestMeta, _ = l.Fields[0].Value.(string)
+			l.Fields[0].Value = ""
+		}
+		if l.Fields[0].Key == "request.body" && l.Fields[0].Type == json.StringType {
+			requestBody, _ = l.Fields[0].Value.(string)
+			l.Fields[0].Value = ""
+		}
 		fields, err := td.convertKeyValues(l.Fields)
 		if err != nil {
-			return nil, err
+			return nil, requestMeta, requestBody, err
 		}
 		retMe[i] = model.Log{
 			Timestamp: model.EpochMicrosecondsAsTime(l.Timestamp),
 			Fields:    fields,
 		}
 	}
-	return retMe, nil
+	return retMe, requestMeta, requestBody, nil
 }
 
 func (td toDomain) convertProcess(process *json.Process) (*model.Process, error) {

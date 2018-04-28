@@ -205,16 +205,10 @@ func (aH *APIHandler) search(w http.ResponseWriter, r *http.Request) {
 
 	var uiErrors []structuredError
 	var tracesFromStorage []*model.Trace
-	if len(tQuery.traceIDs) > 0 {
-		tracesFromStorage, uiErrors, err = aH.tracesByIDs(tQuery.traceIDs)
-		if aH.handleError(w, err, http.StatusInternalServerError) {
-			return
-		}
-	} else {
-		tracesFromStorage, err = aH.spanReader.FindTraces(&tQuery.TraceQueryParameters)
-		if aH.handleError(w, err, http.StatusInternalServerError) {
-			return
-		}
+
+	tracesFromStorage, err = aH.spanReader.FindTraces(&tQuery.TraceQueryParameters)
+	if aH.handleError(w, err, http.StatusInternalServerError) {
+		return
 	}
 
 	uiTraces := make([]*ui.Trace, len(tracesFromStorage))
