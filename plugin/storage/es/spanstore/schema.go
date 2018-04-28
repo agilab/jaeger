@@ -57,6 +57,14 @@ var (
 		       "type":"keyword",
 		       "ignore_above":256
 		    },
+			"RequestMeta":{
+		       "type":"keyword",
+		       "ignore_above":1024
+		    },
+			"RequestBody":{
+		       "type":"keyword",
+		       "ignore_above":1024
+		    },
 		    "startTime":{
 		       "type":"long"
 		    },

@@ -49,8 +49,8 @@ const (
 	logFieldsField     = "logs.fields"
 	tagKeyField        = "key"
 	tagValueField      = "value"
-	requestMetaField   = "request_meta"
-	requestBodyField   = "request_body"
+	requestMetaField   = "RequestMeta"
+	requestBodyField   = "RequestBody"
 
 	defaultDocCount  = 10000 // the default elasticsearch allowed limit
 	defaultNumTraces = 100

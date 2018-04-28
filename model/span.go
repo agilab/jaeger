@@ -57,8 +57,8 @@ type Span struct {
 	Logs          []Log         `json:"logs,omitempty"`
 	Process       *Process      `json:"process"`
 	Warnings      []string      `json:"warnings,omitempty"`
-	RequestMeta   string        `json:"request_meta"`
-	RequestBody   string        `json:"request_body"`
+	RequestMeta   string        `json:"RequestMeta"`
+	RequestBody   string        `json:"RequestBody"`
 }
 
 // Hash implements Hash from Hashable.
