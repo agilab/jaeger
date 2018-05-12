@@ -45,6 +45,8 @@ const (
 	lazyParam        = "lazy"
 	requestMetaParam = "requestMetaParam"
 	requestBodyParam = "requestBodyParam"
+	findTypeParam    = "findType"
+	baseSpanIDParam  = "baseSpanID"
 )
 
 var (

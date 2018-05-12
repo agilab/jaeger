@@ -119,6 +119,10 @@ func (m *Store) WriteSpan(span *model.Span) error {
 	return nil
 }
 
+func (s *Store) GetSpans(findType, baseSpanID string, StartTimeMin, StartTimeMax time.Time) ([]*model.Span, error) {
+	panic("not impl")
+}
+
 // GetTrace gets a trace
 func (m *Store) GetTrace(traceID model.TraceID) (*model.Trace, error) {
 	m.RLock()

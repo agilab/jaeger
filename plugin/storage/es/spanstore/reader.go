@@ -25,6 +25,8 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/olivere/elastic.v5"
 
+	"log"
+
 	"github.com/jaegertracing/jaeger/model"
 	jConverter "github.com/jaegertracing/jaeger/model/converter/json"
 	jModel "github.com/jaegertracing/jaeger/model/json"
@@ -112,7 +114,7 @@ func newSpanReader(client es.Client, logger *zap.Logger, maxLookback time.Durati
 // GetTrace takes a traceID and returns a Trace associated with that traceID
 func (s *SpanReader) GetTrace(traceID model.TraceID) (*model.Trace, error) {
 	currentTime := time.Now()
-	traces, err := s.multiRead([]string{traceID.String()}, currentTime.Add(-s.maxLookback), currentTime)
+	traces, err := s.multiRead([]string{traceID.String()}, currentTime.Add(-s.maxLookback), currentTime, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +194,43 @@ func bucketToStringArray(buckets []*elastic.AggregationBucketKeyItem) ([]string,
 	return strings, nil
 }
 
+func (s *SpanReader) GetSpans(findType, baseSpanID string, StartTimeMin, StartTimeMax time.Time) ([]*model.Span, error) {
+	indices := findIndices(spanIndexPrefix, StartTimeMin.Add(-time.Hour), StartTimeMax.Add(time.Hour))
+	query := elastic.NewTermQuery("spanID", baseSpanID)
+	result, err := s.client.Search(indices...).Query(query).Do(s.ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Hits.Hits) == 0 {
+		return nil, errors.New("baseSpanID不存在")
+	}
+	fetchSpans, err := s.collectSpans(result.Hits.Hits)
+	baseSpan := fetchSpans[0]
+	var spanQuery elastic.Query
+	switch findType {
+	case "before":
+		spanQuery = elastic.NewBoolQuery().Must(
+			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
+			elastic.NewRangeQuery("startTimeMillis").Lt(baseSpan.StartTime.Unix()*1000))
+	case "after":
+		spanQuery = elastic.NewBoolQuery().Must(
+			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
+			elastic.NewRangeQuery("startTimeMillis").Gt(baseSpan.StartTime.Unix()*1000))
+	case "child":
+		spanQuery = elastic.NewTermQuery("parentSpanID", baseSpan.SpanID)
+	}
+	spanResults, err := s.client.Search(indices...).Query(elastic.NewSearchSource().Query(spanQuery).
+		Sort("startTime", true)).Do(s.ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(spanResults.Hits.Hits) == 0 {
+		return []*model.Span{}, nil
+	}
+	fetchSpans, err = s.collectSpans(result.Hits.Hits)
+	return fetchSpans, err
+}
+
 // FindTraces retrieves traces that match the traceQuery
 func (s *SpanReader) FindTraces(traceQuery *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
 	if err := validateQuery(traceQuery); err != nil {
@@ -200,110 +239,14 @@ func (s *SpanReader) FindTraces(traceQuery *spanstore.TraceQueryParameters) ([]*
 	if traceQuery.NumTraces == 0 {
 		traceQuery.NumTraces = defaultNumTraces
 	}
-	if traceQuery.Lazy == 0 {
-		uniqueTraceIDs, err := s.findTraceIDs(traceQuery)
-		if err != nil {
-			return nil, err
-		}
-		return s.multiRead(uniqueTraceIDs, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
-	} else {
-		spans, err := s.findSpans(traceQuery)
-		if err != nil {
-			return nil, err
-		}
-		return s.multiReadSpans(spans, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
+	uniqueTraceIDs, err := s.findTraceIDs(traceQuery)
+	if err != nil {
+		return nil, err
 	}
+	return s.multiRead(uniqueTraceIDs, traceQuery.StartTimeMin, traceQuery.StartTimeMax, traceQuery)
 }
 
-func (s *SpanReader) multiReadSpans(spans []*model.Span, startTime, endTime time.Time) ([]*model.Trace, error) {
-	if len(spans) == 0 {
-		return []*model.Trace{}, nil
-	}
-	searchRequests := make([]*elastic.SearchRequest, len(spans))
-
-	var traces []*model.Trace
-	// Add an hour in both directions so that traces that straddle two indexes are retrieved.
-	// i.e starts in one and ends in another.
-	indices := findIndices(spanIndexPrefix, startTime.Add(-time.Hour), endTime.Add(time.Hour))
-
-	tracesMap := make(map[string]*model.Trace)
-	first := true
-	for {
-		if spans == nil || len(spans) == 0 {
-			break
-		}
-
-		for i, span := range spans {
-			if first {
-				query := elastic.NewBoolQuery().Must(elastic.NewTermQuery("parentSpanID", span.ParentSpanID),
-					elastic.NewRangeQuery("startTimeMillis").Lte(span.StartTime.Unix()*1000))
-				searchRequests[i] = elastic.NewSearchRequest().IgnoreUnavailable(true).
-					Type("span").Source(elastic.NewSearchSource().Query(query).Size(10).
-					Sort("startTime", true))
-			} else {
-				query := elastic.NewTermQuery("spanID", span.ParentSpanID)
-				searchRequests[i] = elastic.NewSearchRequest().IgnoreUnavailable(true).
-					Type("span").Source(elastic.NewSearchSource().Query(query).Size(1))
-			}
-		}
-
-		results, err := s.client.MultiSearch().Add(searchRequests...).Index(indices...).Do(s.ctx)
-
-		if err != nil {
-			return nil, err
-		}
-
-		if results.Responses == nil || len(results.Responses) == 0 {
-			break
-		}
-
-		spans = nil
-
-		for _, result := range results.Responses {
-			if result.Hits == nil || len(result.Hits.Hits) == 0 {
-				continue
-			}
-
-			fetchSpans, err := s.collectSpans(result.Hits.Hits)
-			if err != nil {
-				return nil, err
-			}
-			if len(fetchSpans) == 0 {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-
-			lastSpan := spans[len(spans)-1]
-			lastSpanTraceID := lastSpan.TraceID.String()
-			if first && len(result.Hits.Hits) > 10 {
-				spans[0].Warnings = append(spans[0].Warnings, "unfinished")
-				lastSpan.Warnings = append(lastSpan.Warnings, "unfinished")
-			}
-
-			if traceSpan, ok := tracesMap[lastSpanTraceID]; ok {
-				for _, span := range spans {
-					traceSpan.Spans = append(traceSpan.Spans, span)
-				}
-			} else {
-				tracesMap[lastSpanTraceID] = &model.Trace{Spans: spans}
-			}
-
-			if lastSpan.TraceID.String() != lastSpan.SpanID.String() {
-				spans = append(spans, lastSpan)
-			}
-		}
-		first = false
-	}
-
-	for _, trace := range tracesMap {
-		traces = append(traces, trace)
-	}
-	return traces, nil
-}
-
-func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time) ([]*model.Trace, error) {
+func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time, traceQuery *spanstore.TraceQueryParameters) ([]*model.Trace, error) {
 
 	if len(traceIDs) == 0 {
 		return []*model.Trace{}, nil
@@ -320,13 +263,21 @@ func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time) 
 	searchAfterTime := make(map[string]uint64)
 	totalDocumentsFetched := make(map[string]int)
 	tracesMap := make(map[string]*model.Trace)
+
+	var parentSpanIDMap = make(map[model.SpanID]bool)
 	for {
 		if traceIDs == nil || len(traceIDs) == 0 {
 			break
 		}
 
 		for i, traceID := range traceIDs {
-			query := elastic.NewTermQuery("traceID", traceID)
+			var query elastic.Query
+			query = elastic.NewTermQuery("traceID", traceID)
+			if traceQuery != nil && traceQuery.Lazy != 0 {
+				mustQuery := elastic.NewBoolQuery().Must(elastic.NewTermQuery("traceID", traceID))
+				mustQuery.Must(s.buildFindTraceIDsQuery(traceQuery))
+				query = mustQuery
+			}
 			if val, ok := searchAfterTime[traceID]; ok {
 				nextTime = val
 			}
@@ -357,10 +308,22 @@ func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time) 
 
 			if traceSpan, ok := tracesMap[lastSpanTraceID]; ok {
 				for _, span := range spans {
+					if _, ok := parentSpanIDMap[span.ParentSpanID]; !ok {
+						if span.SpanID != span.ParentSpanID && span.ParentSpanID != 0 {
+							parentSpanIDMap[span.ParentSpanID] = true
+						}
+					}
 					traceSpan.Spans = append(traceSpan.Spans, span)
 				}
 
 			} else {
+				for _, span := range spans {
+					if _, ok := parentSpanIDMap[span.ParentSpanID]; !ok {
+						if span.SpanID != span.ParentSpanID && span.ParentSpanID != 0 {
+							parentSpanIDMap[span.ParentSpanID] = true
+						}
+					}
+				}
 				tracesMap[lastSpanTraceID] = &model.Trace{Spans: spans}
 			}
 
@@ -369,6 +332,37 @@ func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time) 
 				traceIDs = append(traceIDs, lastSpanTraceID)
 				searchAfterTime[lastSpanTraceID] = model.TimeAsEpochMicroseconds(lastSpan.StartTime)
 			}
+		}
+	}
+	for {
+		var parentSpanIDs []interface{}
+		for parentSpanID := range parentSpanIDMap {
+			parentSpanIDs = append(parentSpanIDs, parentSpanID)
+			log.Println(parentSpanIDs)
+		}
+		//TODO 目前只支持1w个以内的懒加载模式
+		searchResults, err := s.client.Search(indices...).Query(elastic.NewTermsQuery("spanID", parentSpanIDs...)).Size(defaultDocCount).Do(s.ctx)
+		if err != nil {
+			return nil, err
+		}
+		if searchResults == nil || len(searchResults.Hits.Hits) == 0 {
+			break
+		}
+		spans, err := s.collectSpans(searchResults.Hits.Hits)
+		if err != nil {
+			return nil, err
+		}
+		parentSpanIDMap = make(map[model.SpanID]bool)
+		for _, span := range spans {
+			if _, ok := parentSpanIDMap[span.ParentSpanID]; !ok {
+				if span.SpanID != span.ParentSpanID && span.ParentSpanID != 0 {
+					parentSpanIDMap[span.ParentSpanID] = true
+				}
+			}
+			tracesMap[span.TraceID.String()].Spans = append(tracesMap[span.TraceID.String()].Spans, span)
+		}
+		if len(parentSpanIDMap) == 0 {
+			break
 		}
 	}
 
@@ -469,72 +463,6 @@ func (s *SpanReader) findTraceIDs(traceQuery *spanstore.TraceQueryParameters) ([
 
 	traceIDBuckets := bucket.Buckets
 	return bucketToStringArray(traceIDBuckets)
-}
-
-func (s *SpanReader) findSpans(traceQuery *spanstore.TraceQueryParameters) ([]*model.Span, error) {
-	//  Below is the JSON body to our HTTP GET request to ElasticSearch. This function creates this.
-	// {
-	//      "size": 0,
-	//      "source":{
-	//      "query": {
-	//        "bool": {
-	//          "must": [
-	//            { "match": { "operationName":   "op1"      }},
-	//            { "match": { "process.serviceName": "service1" }},
-	//            { "range":  { "startTime": { "gte": 0, "lte": 90000000000000000 }}},
-	//            { "range":  { "duration": { "gte": 0, "lte": 90000000000000000 }}},
-	//            { "should": [
-	//                   { "nested" : {
-	//                      "path" : "tags",
-	//                      "query" : {
-	//                          "bool" : {
-	//                              "must" : [
-	//                              { "match" : {"tags.key" : "tag3"} },
-	//                              { "match" : {"tags.value" : "xyz"} }
-	//                              ]
-	//                          }}}},
-	//                   { "nested" : {
-	//                          "path" : "process.tags",
-	//                          "query" : {
-	//                              "bool" : {
-	//                                  "must" : [
-	//                                  { "match" : {"tags.key" : "tag3"} },
-	//                                  { "match" : {"tags.value" : "xyz"} }
-	//                                  ]
-	//                              }}}},
-	//                   { "nested" : {
-	//                          "path" : "logs.fields",
-	//                          "query" : {
-	//                              "bool" : {
-	//                                  "must" : [
-	//                                  { "match" : {"tags.key" : "tag3"} },
-	//                                  { "match" : {"tags.value" : "xyz"} }
-	//                                  ]
-	//                              }}}}
-	//                ]
-	//              }
-	//          ]
-	//        }
-	//      },
-	//      "aggs": { "traceIDs" : { "terms" : {"size": 100,"field": "traceID" }}}
-	//  }
-	aggregation := elastic.NewFetchSourceContext(true)
-	boolQuery := s.buildFindTraceIDsQuery(traceQuery)
-
-	jaegerIndices := findIndices(spanIndexPrefix, traceQuery.StartTimeMin, traceQuery.StartTimeMax)
-
-	searchService := s.client.Search(jaegerIndices...).
-		Type(spanType).
-		Size(0). // set to 0 because we don't want actual documents.
-		Aggregation(traceIDAggregation, aggregation).
-		IgnoreUnavailable(true).
-		Query(boolQuery)
-
-	searchResult, err := searchService.Do(s.ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "Search service failed")
-	}
-	return s.collectSpans(searchResult.Hits.Hits)
 }
 
 func (s *SpanReader) buildTraceIDAggregation(numOfTraces int) elastic.Aggregation {

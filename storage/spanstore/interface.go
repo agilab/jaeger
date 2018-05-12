@@ -37,6 +37,7 @@ type Reader interface {
 	GetServices() ([]string, error)
 	GetOperations(service string) ([]string, error)
 	FindTraces(query *TraceQueryParameters) ([]*model.Trace, error)
+	GetSpans(findType, baseSpanID string, StartTimeMin, StartTimeMax time.Time) ([]*model.Span, error)
 }
 
 // TraceQueryParameters contains parameters of a trace query.

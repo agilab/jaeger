@@ -218,6 +218,9 @@ func validateQuery(p *spanstore.TraceQueryParameters) error {
 	}
 	return nil
 }
+func (s *SpanReader) GetSpans(findType, baseSpanID string,StartTimeMin, StartTimeMax time.Time) ([]*model.Span, error) {
+	panic("not impl")
+}
 
 // FindTraces retrieves traces that match the traceQuery
 func (s *SpanReader) FindTraces(traceQuery *spanstore.TraceQueryParameters) ([]*model.Trace, error) {

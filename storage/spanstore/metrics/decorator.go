@@ -102,3 +102,11 @@ func (m *ReadMetricsDecorator) GetOperations(service string) ([]string, error) {
 	m.getOperationsMetrics.emit(err, time.Since(start), len(retMe))
 	return retMe, err
 }
+
+// GetOperations implements spanstore.Reader#GetOperations
+func (m *ReadMetricsDecorator) GetSpans(findType, baseSpanID string, StartTimeMin, StartTimeMax time.Time) ([]*model.Span, error) {
+	start := time.Now()
+	retMe, err := m.spanReader.GetSpans(findType,baseSpanID,StartTimeMin,StartTimeMax)
+	m.getOperationsMetrics.emit(err, time.Since(start), len(retMe))
+	return retMe, err
+}

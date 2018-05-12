@@ -123,6 +123,7 @@ func (aH *APIHandler) RegisterRoutes(router *mux.Router) {
 	aH.handleFunc(router, aH.getTrace, "/traces/{%s}", traceIDParam).Methods(http.MethodGet)
 	aH.handleFunc(router, aH.archiveTrace, "/archive/{%s}", traceIDParam).Methods(http.MethodPost)
 	aH.handleFunc(router, aH.search, "/traces").Methods(http.MethodGet)
+	aH.handleFunc(router, aH.findSpans, "/spans").Methods(http.MethodGet)
 	aH.handleFunc(router, aH.getServices, "/services").Methods(http.MethodGet)
 	// TODO change the UI to use this endpoint. Requires ?service= parameter.
 	aH.handleFunc(router, aH.getOperations, "/operations").Methods(http.MethodGet)
@@ -193,6 +194,29 @@ func (aH *APIHandler) getOperations(w http.ResponseWriter, r *http.Request) {
 	structuredRes := structuredResponse{
 		Data:  operations,
 		Total: len(operations),
+	}
+	aH.writeJSON(w, r, &structuredRes)
+}
+func (aH *APIHandler) findSpans(w http.ResponseWriter, r *http.Request) {
+	findType := r.FormValue(findTypeParam)
+	baseSpanID := r.FormValue(baseSpanIDParam)
+
+	startTime, err := aH.queryParser.parseTime(startTimeParam, r)
+	if aH.handleError(w, err, http.StatusInternalServerError) {
+		return
+	}
+	endTime, err := aH.queryParser.parseTime(endTimeParam, r)
+	if aH.handleError(w, err, http.StatusInternalServerError) {
+		return
+	}
+
+	spans, err := aH.spanReader.GetSpans(findType, baseSpanID, startTime, endTime)
+	if aH.handleError(w, err, http.StatusInternalServerError) {
+		return
+	}
+	structuredRes := structuredResponse{
+		Data:  spans,
+		Total: len(spans),
 	}
 	aH.writeJSON(w, r, &structuredRes)
 }
