@@ -25,8 +25,6 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/olivere/elastic.v5"
 
-	"log"
-
 	"github.com/jaegertracing/jaeger/model"
 	jConverter "github.com/jaegertracing/jaeger/model/converter/json"
 	jModel "github.com/jaegertracing/jaeger/model/json"
@@ -209,10 +207,16 @@ func (s *SpanReader) GetSpans(findType, baseSpanID string, StartTimeMin, StartTi
 	var spanQuery elastic.Query
 	switch findType {
 	case "before":
+		if baseSpan.ParentSpanID == 0 {
+			return []*model.Span{}, nil
+		}
 		spanQuery = elastic.NewBoolQuery().Must(
 			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
 			elastic.NewRangeQuery("startTime").Lt(baseSpan.StartTime.UnixNano()/1000))
 	case "after":
+		if baseSpan.ParentSpanID == 0 {
+			return []*model.Span{}, nil
+		}
 		spanQuery = elastic.NewBoolQuery().Must(
 			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
 			elastic.NewRangeQuery("startTime").Gt(baseSpan.StartTime.UnixNano()/1000))
