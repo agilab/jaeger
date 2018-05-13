@@ -211,23 +211,22 @@ func (s *SpanReader) GetSpans(findType, baseSpanID string, StartTimeMin, StartTi
 	case "before":
 		spanQuery = elastic.NewBoolQuery().Must(
 			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
-			elastic.NewRangeQuery("startTimeMillis").Lt(baseSpan.StartTime.Unix()*1000))
+			elastic.NewRangeQuery("startTime").Lt(baseSpan.StartTime.UnixNano()/1000))
 	case "after":
 		spanQuery = elastic.NewBoolQuery().Must(
 			elastic.NewTermQuery("parentSpanID", baseSpan.ParentSpanID),
-			elastic.NewRangeQuery("startTimeMillis").Gt(baseSpan.StartTime.Unix()*1000))
+			elastic.NewRangeQuery("startTime").Gt(baseSpan.StartTime.UnixNano()/1000))
 	case "child":
 		spanQuery = elastic.NewTermQuery("parentSpanID", baseSpan.SpanID)
 	}
-	spanResults, err := s.client.Search(indices...).Query(elastic.NewSearchSource().Query(spanQuery).
-		Sort("startTime", true)).Do(s.ctx)
+	spanResults, err := s.client.Search(indices...).Query(spanQuery).Size(defaultDocCount).Do(s.ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len(spanResults.Hits.Hits) == 0 {
 		return []*model.Span{}, nil
 	}
-	fetchSpans, err = s.collectSpans(result.Hits.Hits)
+	fetchSpans, err = s.collectSpans(spanResults.Hits.Hits)
 	return fetchSpans, err
 }
 
@@ -338,7 +337,6 @@ func (s *SpanReader) multiRead(traceIDs []string, startTime, endTime time.Time, 
 		var parentSpanIDs []interface{}
 		for parentSpanID := range parentSpanIDMap {
 			parentSpanIDs = append(parentSpanIDs, parentSpanID)
-			log.Println(parentSpanIDs)
 		}
 		//TODO 目前只支持1w个以内的懒加载模式
 		searchResults, err := s.client.Search(indices...).Query(elastic.NewTermsQuery("spanID", parentSpanIDs...)).Size(defaultDocCount).Do(s.ctx)

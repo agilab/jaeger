@@ -35,6 +35,7 @@ import (
 	"github.com/jaegertracing/jaeger/pkg/multierror"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
+	"log"
 )
 
 const (
@@ -214,6 +215,7 @@ func (aH *APIHandler) findSpans(w http.ResponseWriter, r *http.Request) {
 	if aH.handleError(w, err, http.StatusInternalServerError) {
 		return
 	}
+	log.Println(len(spans))
 	structuredRes := structuredResponse{
 		Data:  spans,
 		Total: len(spans),
