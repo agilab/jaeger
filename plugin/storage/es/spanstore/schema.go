@@ -23,7 +23,10 @@ const mapping = `{
       "index.number_of_replicas": ${__NUMBER_OF_REPLICAS__},
       "index.mapping.nested_fields.limit":50,
       "index.requests.cache.enable":true,
-      "index.mapper.dynamic":false
+      "index.mapper.dynamic":false,
+      "index.translog.durability": "async",
+	  "index.translog.sync_interval":"120s",
+	  "index.translog.flush_threshold_size":"1024mb"
    },
    "mappings":{
       "_default_":{
@@ -63,7 +66,7 @@ var (
 		    },
 			"RequestBody":{
 		       "type":"keyword",
-		       "ignore_above":1024
+		       "ignore_above":2048
 		    },
 		    "startTime":{
 		       "type":"long"
@@ -89,15 +92,15 @@ var (
 			     "properties":{
 				"key":{
 				   "type":"keyword",
-				   "ignore_above":256
+				   "ignore_above":1
 				},
 				"value":{
 				   "type":"keyword",
-				   "ignore_above":256
+				   "ignore_above":1
 				},
 				"tagType":{
 				   "type":"keyword",
-				   "ignore_above":256
+				   "ignore_above":1
 				}
 			     }
 			  }
