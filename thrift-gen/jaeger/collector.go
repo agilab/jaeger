@@ -96,16 +96,16 @@ func (p *CollectorClient) recvSubmitBatches() (value []*BatchSubmitResponse, err
 		return
 	}
 	if mTypeId == thrift.EXCEPTION {
-		error6 := thrift.NewTApplicationException(thrift.UNKNOWN_APPLICATION_EXCEPTION, "Unknown Exception")
-		var error7 error
-		error7, err = error6.Read(iprot)
+		error8 := thrift.NewTApplicationException(thrift.UNKNOWN_APPLICATION_EXCEPTION, "Unknown Exception")
+		var error9 error
+		error9, err = error8.Read(iprot)
 		if err != nil {
 			return
 		}
 		if err = iprot.ReadMessageEnd(); err != nil {
 			return
 		}
-		err = error7
+		err = error9
 		return
 	}
 	if mTypeId != thrift.REPLY {
@@ -143,9 +143,9 @@ func (p *CollectorProcessor) ProcessorMap() map[string]thrift.TProcessorFunction
 
 func NewCollectorProcessor(handler Collector) *CollectorProcessor {
 
-	self8 := &CollectorProcessor{handler: handler, processorMap: make(map[string]thrift.TProcessorFunction)}
-	self8.processorMap["submitBatches"] = &collectorProcessorSubmitBatches{handler: handler}
-	return self8
+	self10 := &CollectorProcessor{handler: handler, processorMap: make(map[string]thrift.TProcessorFunction)}
+	self10.processorMap["submitBatches"] = &collectorProcessorSubmitBatches{handler: handler}
+	return self10
 }
 
 func (p *CollectorProcessor) Process(iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
@@ -158,12 +158,12 @@ func (p *CollectorProcessor) Process(iprot, oprot thrift.TProtocol) (success boo
 	}
 	iprot.Skip(thrift.STRUCT)
 	iprot.ReadMessageEnd()
-	x9 := thrift.NewTApplicationException(thrift.UNKNOWN_METHOD, "Unknown function "+name)
+	x11 := thrift.NewTApplicationException(thrift.UNKNOWN_METHOD, "Unknown function "+name)
 	oprot.WriteMessageBegin(name, thrift.EXCEPTION, seqId)
-	x9.Write(oprot)
+	x11.Write(oprot)
 	oprot.WriteMessageEnd()
 	oprot.Flush()
-	return false, x9
+	return false, x11
 
 }
 
@@ -271,11 +271,11 @@ func (p *CollectorSubmitBatchesArgs) readField1(iprot thrift.TProtocol) error {
 	tSlice := make([]*Batch, 0, size)
 	p.Batches = tSlice
 	for i := 0; i < size; i++ {
-		_elem10 := &Batch{}
-		if err := _elem10.Read(iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem10), err)
+		_elem12 := &Batch{}
+		if err := _elem12.Read(iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem12), err)
 		}
-		p.Batches = append(p.Batches, _elem10)
+		p.Batches = append(p.Batches, _elem12)
 	}
 	if err := iprot.ReadListEnd(); err != nil {
 		return thrift.PrependError("error reading list end: ", err)
@@ -387,11 +387,11 @@ func (p *CollectorSubmitBatchesResult) readField0(iprot thrift.TProtocol) error 
 	tSlice := make([]*BatchSubmitResponse, 0, size)
 	p.Success = tSlice
 	for i := 0; i < size; i++ {
-		_elem11 := &BatchSubmitResponse{}
-		if err := _elem11.Read(iprot); err != nil {
-			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem11), err)
+		_elem13 := &BatchSubmitResponse{}
+		if err := _elem13.Read(iprot); err != nil {
+			return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem13), err)
 		}
-		p.Success = append(p.Success, _elem11)
+		p.Success = append(p.Success, _elem13)
 	}
 	if err := iprot.ReadListEnd(); err != nil {
 		return thrift.PrependError("error reading list end: ", err)

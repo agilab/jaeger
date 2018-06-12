@@ -45,18 +45,20 @@ type SpanID uint64
 
 // Span represents a unit of work in an application, such as an RPC, a database call, etc.
 type Span struct {
-	TraceID       TraceID       `json:"traceID"`
-	SpanID        SpanID        `json:"spanID"`
-	ParentSpanID  SpanID        `json:"parentSpanID"`
-	OperationName string        `json:"operationName"`
-	References    []SpanRef     `json:"references,omitempty"`
-	Flags         Flags         `json:"flags,omitempty"`
-	StartTime     time.Time     `json:"startTime"`
-	Duration      time.Duration `json:"duration"`
-	Tags          KeyValues     `json:"tags,omitempty"`
-	Logs          []Log         `json:"logs,omitempty"`
-	Process       *Process      `json:"process"`
-	Warnings      []string      `json:"warnings,omitempty"`
+	TraceID             TraceID       `json:"traceID"`
+	SpanID              SpanID        `json:"spanID"`
+	ParentSpanID        SpanID        `json:"parentSpanID"`
+	OperationName       string        `json:"operationName"`
+	References          []SpanRef     `json:"references,omitempty"`
+	Flags               Flags         `json:"flags,omitempty"`
+	StartTime           time.Time     `json:"startTime"`
+	Duration            time.Duration `json:"duration"`
+	Tags                KeyValues     `json:"tags,omitempty"`
+	Logs                []Log         `json:"logs,omitempty"`
+	Process             *Process      `json:"process"`
+	Warnings            []string      `json:"warnings,omitempty"`
+	ParentSpanIds       []int64       `json:"parentSpanIds,omitempty"`
+	ParentOperatorNames []string      `json:"parentOperatorNames,omitempty"`
 }
 
 // Hash implements Hash from Hashable.
