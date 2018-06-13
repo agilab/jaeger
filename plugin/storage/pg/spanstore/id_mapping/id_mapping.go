@@ -10,6 +10,7 @@ import (
 
 	"github.com/agilab/haunt_be/pkg/resource"
 	"github.com/agilab/haunt_be/pkg/tables"
+	"github.com/jaegertracing/jaeger/pkg/cache"
 )
 
 /*
@@ -35,6 +36,9 @@ func InitAndGetIDMappingService() IDMappingService {
 }
 
 type GlobalIDMapping struct {
+	SvcNameCache    *cache.Cache
+	OpTypeNameCache *cache.Cache
+	OpNameCache     *cache.Cache
 	// key值是三个ID，用 `-` 链接
 	OperatorIDMappingMap map[string]*tables.Operator
 	// key 是三个name,用 `-` 链接
