@@ -7,6 +7,7 @@ import (
 
 	"fmt"
 
+	"strings"
 
 	"github.com/go-pg/pg"
 	"github.com/jaegertracing/jaeger/model"
@@ -17,7 +18,7 @@ import (
 	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
 	"github.com/uber/jaeger-client-go/log/zap"
 	"github.com/uber/jaeger-lib/metrics"
-	"strings"
+	"go.uber.org/atomic"
 )
 
 /*
@@ -35,48 +36,72 @@ type SpanWriter struct {
 	writerMetrics    spanWriterMetrics // TODO: build functions to wrap around each Do fn
 	idMappingService id_mapping.IDMappingService
 	tableCache       cache.Cache
-	modeOption       modeOption
+	option           writerOption
+	spanArrayBuf     []*tables.Span
+	arrayBufLen      *atomic.Int64
 }
 
 func NewSpanWriter(
 	db *pg.DB,
 	logger *zap.Logger,
 	metricsFactory metrics.Factory,
-	modeOption modeOption,
+	modeOption writerOption,
 ) *SpanWriter {
 	ctx := context.Background()
-	return &SpanWriter{
+	s := &SpanWriter{
 		ctx:    ctx,
 		db:     db,
 		logger: logger,
 		writerMetrics: spanWriterMetrics{
 			spanInsert: storageMetrics.NewWriteMetrics(metricsFactory, "spanCreate"),
 		},
-		idMappingService: id_mapping.InitAndGetIDMappingService(),
+		idMappingService: id_mapping.InitAndGetIDMappingService(db),
 		tableCache: cache.NewLRUWithOptions(
 			5,
 			&cache.Options{
 				TTL: 4 * time.Hour,
 			},
 		),
-		modeOption: modeOption,
+		option:       modeOption,
+		spanArrayBuf: make([]*tables.Span, 0, modeOption.maxBatchLen),
+	}
+	go s.processQueue()
+	return s
+}
+
+func (s *SpanWriter) processQueue() {
+	timer := time.NewTicker(s.option.bufferFlushInterval)
+	for {
+		select {
+		case <-timer.C:
+			s.Flush()
+		}
 	}
 }
 
 func (s *SpanWriter) WriteSpan(span *model.Span) error {
-	if err := s.createPartitionTable(span.StartTime); err != nil {
+	var err error
+	if err = s.createPartitionTable(span.StartTime); err != nil {
 		return err
 	}
-
+	var tSpan *tables.Span
+	if tSpan, err = s.transportJaegerSpan2PgSpan(span); err != nil {
+		return err
+	}
+	s.spanArrayBuf = append(s.spanArrayBuf, tSpan)
+	if len(s.spanArrayBuf) >= s.option.maxBatchLen {
+		return s.Flush()
+	}
+	return nil
 }
 
-func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span, error){
+func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span, error) {
 	tSpan := new(tables.Span)
 	tSpan.SpanID = int64(span.SpanID)
 	tSpan.TraceID = int64(span.TraceID.Low)
-	tSpan.Request = s.modeOption.getRequestFn(span)
-	tSpan.Response = s.modeOption.getResponseFn(span)
-	tSpan.UserID = s.modeOption.getUserIDFn(span)
+	tSpan.Request = s.option.getRequestFn(span)
+	tSpan.Response = s.option.getResponseFn(span)
+	tSpan.UserID = s.option.getUserIDFn(span)
 	tSpan.ParentSpanIds = span.ParentSpanIds
 	tSpan.StartTime = &span.StartTime
 	tSpan.Duration = span.Duration.Nanoseconds()
@@ -94,22 +119,17 @@ func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span,
 		opType = tips[0]
 		opType = tips[1]
 	}
-	op := s.idMappingService.GetOperatorFromName(span.Process.ServiceName, opType, opName)
-	tSpan.ServiceID = op.ServiceID
-	tSpan.OperatorTypeID = op.OperatorTypeID
-	tSpan.OperatorTypeID = op.OperatorTypeID
-	tSpan.ParentOperatorIds = span.ParentIds
-	tSpan.Process = span.Process
-	tSpan.Reference = span.Reference
-	return tSpan
-}
-
-func buildLogs2Map(tags model.KeyValues) map[string]string {
-	logMap := make(map[string]interface{}, 0)
-	for _, tag := range tags {
-		tagMap[tag.Key] = tag.AsString()
+	tSpan.ServiceID = s.idMappingService.GetIDFromName(span.Process.ServiceName, tables.OpMetaTypeEnum.Service)
+	tSpan.OperatorTypeID = s.idMappingService.GetIDFromName(opType, tables.OpMetaTypeEnum.OpType)
+	tSpan.OperatorTypeID = s.idMappingService.GetIDFromName(opName, tables.OpMetaTypeEnum.OpName)
+	tSpan.ParentOperatorIds = make([]int64, 0)
+	for _, parentOperatorName := range span.ParentOperatorNames {
+		opId := s.idMappingService.GetIDFromName(parentOperatorName, tables.OpMetaTypeEnum.OpName)
+		tSpan.ParentOperatorIds = append(tSpan.ParentOperatorIds, opId)
 	}
-	return tagMap
+	tSpan.Process = buildTags2Map(span.Process.Tags)
+	tSpan.Reference = span.References
+	return tSpan, nil
 }
 
 func buildTags2Map(tags model.KeyValues) map[string]interface{} {
@@ -123,7 +143,7 @@ func buildTags2Map(tags model.KeyValues) map[string]interface{} {
 func (s *SpanWriter) createPartitionTable(startTime time.Time) error {
 	tbName := tableNames(startTime)
 	if !keyInCache(tbName, s.tableCache) {
-		err := pgutil.CreatePartitionSpanTable(startTime)
+		err := pgutil.CreatePartitionSpanTable(s.db, startTime)
 		if err != nil {
 			s.logger.Error(fmt.Sprintf("create index failed:%s", err.Error()))
 			return err
@@ -131,6 +151,17 @@ func (s *SpanWriter) createPartitionTable(startTime time.Time) error {
 		writeCache(tbName, s.tableCache)
 	}
 	return nil
+}
+func (s *SpanWriter) Flush() error {
+	start := time.Now()
+	count := len(s.spanArrayBuf)
+	if count == 0 {
+		return nil
+	}
+	_, err := s.db.Model(&tables.Span{}).Insert(s.spanArrayBuf)
+	s.spanArrayBuf = s.spanArrayBuf[:0]
+	s.writerMetrics.spanInsert.Emit(err, time.Since(start))
+	return err
 }
 func tableNames(startTime time.Time) string {
 	return pgutil.GetStartTimeFmt(startTime)
