@@ -95,13 +95,28 @@ func (s *SpanWriter) WriteSpan(span *model.Span) error {
 	return nil
 }
 
+func (s *SpanWriter) transportFromLogTag(span *model.Span) (request string, userId int64) {
+	for _, log := range span.Logs {
+		for _, field := range log.Fields {
+			if field.Key == s.option.requestLogKey {
+				request = field.AsString()
+			}
+		}
+	}
+	for _, tag := range span.Tags {
+		if tag.Key == s.option.userIdTagKey {
+			userId = tag.Int64()
+		}
+	}
+	return
+}
+
 func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span, error) {
 	tSpan := new(tables.Span)
-	tSpan.SpanID = int64(span.SpanID)
-	tSpan.TraceID = int64(span.TraceID.Low)
-	tSpan.Request = s.option.getRequestFn(span)
-	tSpan.Response = s.option.getResponseFn(span)
-	tSpan.UserID = s.option.getUserIDFn(span)
+	tSpan.SpanID = uint64(span.SpanID)
+	tSpan.TraceIDLow = span.TraceID.Low
+	tSpan.TraceIDHigh = span.TraceID.High
+	tSpan.Request, tSpan.UserID = s.transportFromLogTag(span)
 	tSpan.ParentSpanIds = span.ParentSpanIds
 	tSpan.StartTime = &span.StartTime
 	tSpan.Duration = span.Duration.Nanoseconds()

@@ -11,8 +11,9 @@ import (
  */
 
 type Span struct {
-	SpanID            int64
-	TraceID           int64
+	SpanID            uint64
+	TraceIDLow        uint64
+	TraceIDHigh       uint64
 	ParentSpanIds     []int64 `pg:",array"`
 	Flags             int64
 	OperatorID        int64
