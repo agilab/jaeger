@@ -125,25 +125,26 @@ func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span,
 	tSpan.Flags = int64(span.Flags)
 	tSpan.Warnings = span.Warnings
 	tips := strings.SplitN(span.OperationName, " ", 2)
-	var opType, opName string
+	var opType, opName = "Unknown", "Unknown"
 	if len(tips) == 1 {
-		opType = ""
+		opType = "Unknown"
 		opName = tips[0]
 	}
 	if len(tips) == 2 {
 		opType = tips[0]
-		opType = tips[1]
+		opName = tips[1]
 	}
-	tSpan.ServiceID = s.idMappingService.GetIDFromName(span.Process.ServiceName, tables.OpMetaTypeEnum.Service)
-	tSpan.OperatorTypeID = s.idMappingService.GetIDFromName(opType, tables.OpMetaTypeEnum.OpType)
-	tSpan.OperatorTypeID = s.idMappingService.GetIDFromName(opName, tables.OpMetaTypeEnum.OpName)
+	tSpan.ServiceID = s.idMappingService.GetIdFromName(span.Process.ServiceName, tables.OpMetaTypeEnum.Service)
+	tSpan.OperatorTypeID = s.idMappingService.GetIdFromName(opType, tables.OpMetaTypeEnum.OpType)
+	tSpan.OperatorTypeID = s.idMappingService.GetIdFromName(opName, tables.OpMetaTypeEnum.OpName)
 	tSpan.ParentOperatorIds = make([]int64, 0)
 	for _, parentOperatorName := range span.ParentOperatorNames {
-		opId := s.idMappingService.GetIDFromName(parentOperatorName, tables.OpMetaTypeEnum.OpName)
+		opId := s.idMappingService.GetIdFromName(parentOperatorName, tables.OpMetaTypeEnum.OpName)
 		tSpan.ParentOperatorIds = append(tSpan.ParentOperatorIds, opId)
 	}
 	tSpan.Process = buildTags2Map(span.Process.Tags)
 	tSpan.Reference = span.References
+	s.idMappingService.RegisterIDRelation(tSpan.ServiceID, tSpan.OperatorTypeID, tSpan.OperatorID)
 	return tSpan, nil
 }
 

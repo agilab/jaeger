@@ -3,6 +3,10 @@ package id_mapping
 import (
 	"fmt"
 
+	"strconv"
+
+	"log"
+
 	"github.com/go-pg/pg"
 	"github.com/jaegertracing/jaeger/pkg/cache"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/tables"
@@ -13,8 +17,9 @@ import (
  */
 
 type IDMappingService interface {
-	GetIDFromName(serviceName string, metaType int64) int64
-	GetNameFromID(id int64, metaType int64) string
+	GetIdFromName(serviceName string, metaType int64) int64
+	GetNameFromId(id int64, metaType int64) string
+	RegisterIDRelation(serviceId, opTypeId, opNameId int64)
 }
 
 var idMappingService IDMappingService
@@ -25,7 +30,8 @@ func InitAndGetIDMappingService(db *pg.DB) IDMappingService {
 	if idMappingService == nil {
 		idMappingServiceImp := &GlobalIDMapping{}
 		idMappingServiceImp.db = db
-		idMappingServiceImp.lruCache = cache.NewLRU(CacheMaxSize)
+		idMappingServiceImp.lruOpMetaCache = cache.NewLRU(CacheMaxSize)
+		idMappingServiceImp.lruOpRelationCache = cache.NewLRU(CacheMaxSize)
 		idMappingServiceImp.LoadData()
 		idMappingService = idMappingServiceImp
 	}
@@ -33,8 +39,28 @@ func InitAndGetIDMappingService(db *pg.DB) IDMappingService {
 }
 
 type GlobalIDMapping struct {
-	lruCache cache.Cache
-	db       *pg.DB
+	lruOpMetaCache     cache.Cache
+	lruOpRelationCache cache.Cache
+	db                 *pg.DB
+}
+
+func (g *GlobalIDMapping) RegisterIDRelation(serviceId, opTypeId, opNameId int64) {
+	cacheKey := strconv.FormatInt(serviceId, 36) + strconv.FormatInt(opTypeId, 36) + strconv.FormatInt(opNameId, 36)
+	v := g.lruOpRelationCache.Get(cacheKey)
+	if v != nil {
+		return
+	} else {
+		g.lruOpRelationCache.Put(cacheKey, true)
+		opRelation := &tables.OpRelation{
+			ServiceId: serviceId,
+			OpTypeId:  opTypeId,
+			OpNameId:  opNameId,
+		}
+		_, err := g.db.Model(opRelation).OnConflict("DO NOTHING").Insert()
+		if err != nil {
+			log.Println("opRelation Insert Failed!", err)
+		}
+	}
 }
 
 func makeNameKey(metaType int64, name string) string {
@@ -52,8 +78,8 @@ func (g *GlobalIDMapping) LoadData() error {
 		return err
 	}
 	for _, opMeta := range opMetas {
-		g.lruCache.Put(makeNameKey(opMeta.Type, opMeta.Name), opMeta.Id)
-		g.lruCache.Put(makeIdKey(opMeta.Type, opMeta.Id), opMeta.Name)
+		g.lruOpMetaCache.Put(makeNameKey(opMeta.Type, opMeta.Name), opMeta.Id)
+		g.lruOpMetaCache.Put(makeIdKey(opMeta.Type, opMeta.Id), opMeta.Name)
 	}
 	return nil
 }
@@ -65,19 +91,19 @@ func (g *GlobalIDMapping) saveItem(name string, metaType int64) error {
 	if err != nil {
 		return err
 	}
-	g.lruCache.Put(makeNameKey(opMeta.Type, opMeta.Name), opMeta.Id)
-	g.lruCache.Put(makeIdKey(opMeta.Type, opMeta.Id), opMeta.Name)
+	g.lruOpMetaCache.Put(makeNameKey(opMeta.Type, opMeta.Name), opMeta.Id)
+	g.lruOpMetaCache.Put(makeIdKey(opMeta.Type, opMeta.Id), opMeta.Name)
 	return nil
 }
 
-func (g GlobalIDMapping) GetIDFromName(name string, metaType int64) int64 {
-	idObj := g.lruCache.Get(makeNameKey(metaType, name))
+func (g GlobalIDMapping) GetIdFromName(name string, metaType int64) int64 {
+	idObj := g.lruOpMetaCache.Get(makeNameKey(metaType, name))
 	id, ok := idObj.(int64)
 	if ok {
 		return id
 	}
 	g.saveItem(name, metaType)
-	idObj = g.lruCache.Get(makeNameKey(metaType, name))
+	idObj = g.lruOpMetaCache.Get(makeNameKey(metaType, name))
 	id, ok = idObj.(int64)
 	if ok {
 		return id
@@ -85,8 +111,8 @@ func (g GlobalIDMapping) GetIDFromName(name string, metaType int64) int64 {
 	return 0
 }
 
-func (g GlobalIDMapping) GetNameFromID(id int64, metaType int64) string {
-	nameObj := g.lruCache.Get(makeIdKey(metaType, id))
+func (g GlobalIDMapping) GetNameFromId(id int64, metaType int64) string {
+	nameObj := g.lruOpMetaCache.Get(makeIdKey(metaType, id))
 	name, ok := nameObj.(string)
 	if ok {
 		return name
