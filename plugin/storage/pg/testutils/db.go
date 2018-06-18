@@ -6,7 +6,7 @@ import (
 )
 
 func NewDB() *pg.DB {
-	viper.Set("db.url", "47.96.24.203:5432")
+	viper.Set("db.url", "192.168.22.16:5432")
 	viper.Set("db.user", "postgres")
 	viper.Set("db.password", "sz1234")
 	viper.Set("db.database", "postgres")
