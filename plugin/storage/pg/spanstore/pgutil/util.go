@@ -25,12 +25,11 @@ func CreatePartitionTableFromTo(db *pg.DB, startTime, endTime time.Time) {
 func CreatePartitionSpanTable(db *pg.DB, startTime time.Time) error {
 	tablename := GetPartitionTableName("spans", startTime)
 	sql := fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS "public"."%s" PARTITION OF "public"."spans"
+CREATE UNLOGGED TABLE IF NOT EXISTS "public"."%s" PARTITION OF "public"."spans"
 FOR VALUES FROM ('%s') TO ('%s')
 ;
 ALTER TABLE "public"."%s" OWNER TO "postgres";
 `, tablename, GetStartTimeFmt(startTime), GetEndTimeFmt(startTime), tablename)
-	fmt.Println(tablename, GetStartTimeFmt(startTime), GetEndTimeFmt(startTime))
 	_, err := db.Exec(sql)
 	return err
 }
@@ -41,14 +40,15 @@ func GetPartitionTableName(parentName string, startTime time.Time) string {
 
 func GetStartTimeFmt(startTime time.Time) string {
 	trimTime := TrimTime2Houer(startTime)
-	return trimTime.Format("2006-01-02 15:04:05")
+	return trimTime.Format("2006-01-02 15:04:05 MST")
 }
+
 func GetEndTimeFmt(startTime time.Time) string {
 	trimTime := TrimTime2Houer(startTime)
 	return trimTime.Add(time.Hour).Format("2006-01-02 15:04:05")
 }
 
 func TrimTime2Houer(startTime time.Time) time.Time {
-	trimTime, _ := time.ParseInLocation("2006-01-02 15", startTime.Format("2006-01-02 15"), time.Local)
+	trimTime, _ := time.ParseInLocation("2006-01-02 15", startTime.Format("2006-01-02 15"), time.UTC)
 	return trimTime
 }

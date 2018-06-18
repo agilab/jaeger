@@ -9,6 +9,10 @@ import (
 
 	"strings"
 
+	"log"
+
+	"sync"
+
 	"github.com/go-pg/pg"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/cache"
@@ -16,9 +20,9 @@ import (
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/pgutil"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/tables"
 	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
-	"github.com/uber/jaeger-client-go/log/zap"
 	"github.com/uber/jaeger-lib/metrics"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 /*
@@ -39,6 +43,7 @@ type SpanWriter struct {
 	option           writerOption
 	spanArrayBuf     []*tables.Span
 	arrayBufLen      *atomic.Int64
+	lock             sync.Mutex
 }
 
 func NewSpanWriter(
@@ -64,6 +69,7 @@ func NewSpanWriter(
 		),
 		option:       modeOption,
 		spanArrayBuf: make([]*tables.Span, 0, modeOption.maxBatchLen),
+		lock:         sync.Mutex{},
 	}
 	go s.processQueue()
 	return s
@@ -81,14 +87,17 @@ func (s *SpanWriter) processQueue() {
 
 func (s *SpanWriter) WriteSpan(span *model.Span) error {
 	var err error
-	if err = s.createPartitionTable(span.StartTime); err != nil {
+	if err = s.createPartitionTable(span.StartTime.UTC()); err != nil {
 		return err
 	}
 	var tSpan *tables.Span
 	if tSpan, err = s.transportJaegerSpan2PgSpan(span); err != nil {
+		log.Println(err)
 		return err
 	}
+	s.lock.Lock()
 	s.spanArrayBuf = append(s.spanArrayBuf, tSpan)
+	s.lock.Unlock()
 	if len(s.spanArrayBuf) >= s.option.maxBatchLen {
 		return s.Flush()
 	}
@@ -118,7 +127,8 @@ func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span,
 	tSpan.TraceIDHigh = span.TraceID.High
 	tSpan.Request, tSpan.UserID = s.transportFromLogTag(span)
 	tSpan.ParentSpanIds = span.ParentSpanIds
-	tSpan.StartTime = &span.StartTime
+	utcTime := span.StartTime
+	tSpan.StartTime = &utcTime
 	tSpan.Duration = span.Duration.Nanoseconds()
 	tSpan.Tags = buildTags2Map(span.Tags)
 	tSpan.Logs = span.Logs
@@ -169,12 +179,15 @@ func (s *SpanWriter) createPartitionTable(startTime time.Time) error {
 	return nil
 }
 func (s *SpanWriter) Flush() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	start := time.Now()
 	count := len(s.spanArrayBuf)
 	if count == 0 {
 		return nil
 	}
-	_, err := s.db.Model(&tables.Span{}).Insert(s.spanArrayBuf)
+	result, err := s.db.Model(&s.spanArrayBuf).Insert(&s.spanArrayBuf)
+	log.Println("result", result, err)
 	s.spanArrayBuf = s.spanArrayBuf[:0]
 	s.writerMetrics.spanInsert.Emit(err, time.Since(start))
 	return err

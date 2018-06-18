@@ -23,9 +23,9 @@ type Span struct {
 	StartTime         *time.Time
 	Duration          int64
 	Tags              map[string]interface{}
-	Logs              []model.Log
+	Logs              []model.Log `pg:",array"`
 	Process           map[string]interface{}
-	Reference         []model.SpanRef
+	Reference         []model.SpanRef `pg:",array"`
 	Warnings          []string `pg:",array"`
 	UserID            int64
 	Response          string
