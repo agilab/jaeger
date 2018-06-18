@@ -101,10 +101,10 @@ func (s *SpanWriter) WriteSpan(span *model.Span) error {
 	}
 	s.lock.Lock()
 	s.spanArrayBuf = append(s.spanArrayBuf, tSpan)
-	s.lock.Unlock()
 	if len(s.spanArrayBuf) >= s.option.maxBatchLen {
-		return s.Flush()
+		return s.flush()
 	}
+	s.lock.Unlock()
 	return nil
 }
 
@@ -183,9 +183,12 @@ func (s *SpanWriter) createPartitionTable(startTime time.Time) error {
 	return nil
 }
 func (s *SpanWriter) Flush() error {
-	s.resetFlushTimeChan <- true
 	s.lock.Lock()
-	defer s.lock.Unlock()
+	defer s.lock.Lock()
+	return s.flush()
+}
+func (s *SpanWriter) flush() error {
+	s.resetFlushTimeChan <- true
 	start := time.Now()
 	count := len(s.spanArrayBuf)
 	if count == 0 {
