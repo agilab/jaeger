@@ -100,11 +100,11 @@ func (s *SpanWriter) WriteSpan(span *model.Span) error {
 		return err
 	}
 	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.spanArrayBuf = append(s.spanArrayBuf, tSpan)
 	if len(s.spanArrayBuf) >= s.option.maxBatchLen {
-		return s.flush()
+		s.flush()
 	}
-	s.lock.Unlock()
 	return nil
 }
 
