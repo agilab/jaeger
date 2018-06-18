@@ -75,12 +75,13 @@ func Benchmark_SpanWriter_WriteSpan(b *testing.B) {
 		Warnings: []string{"warnings1"},
 	}
 	//start := time.Now()
+	goroutineCount := 50
 	wg := sync.WaitGroup{}
-	b.N = 20 * 10000
-	wg.Add(20)
-	for i := 0; i < 20; i++ {
+	b.N = goroutineCount * 10000
+	wg.Add(goroutineCount)
+	for i := 0; i < goroutineCount; i++ {
 		go func() {
-			for j := 0; j < b.N/20; j++ {
+			for j := 0; j < b.N/goroutineCount; j++ {
 				mSpan.SpanID = model.SpanID(i*1000000 + j)
 				writeSpan(spanWriter, mSpan)
 			}

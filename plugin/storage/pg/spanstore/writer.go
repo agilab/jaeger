@@ -34,16 +34,17 @@ type spanWriterMetrics struct {
 
 // SpanWriter is a wrapper around elastic.Client
 type SpanWriter struct {
-	ctx              context.Context
-	db               *pg.DB
-	logger           *zap.Logger
-	writerMetrics    spanWriterMetrics // TODO: build functions to wrap around each Do fn
-	idMappingService id_mapping.IDMappingService
-	tableCache       cache.Cache
-	option           writerOption
-	spanArrayBuf     []*tables.Span
-	arrayBufLen      *atomic.Int64
-	lock             sync.Mutex
+	ctx                context.Context
+	db                 *pg.DB
+	logger             *zap.Logger
+	writerMetrics      spanWriterMetrics // TODO: build functions to wrap around each Do fn
+	idMappingService   id_mapping.IDMappingService
+	tableCache         cache.Cache
+	option             writerOption
+	spanArrayBuf       []*tables.Span
+	arrayBufLen        *atomic.Int64
+	lock               sync.Mutex
+	resetFlushTimeChan chan bool
 }
 
 func NewSpanWriter(
@@ -67,9 +68,10 @@ func NewSpanWriter(
 				TTL: 4 * time.Hour,
 			},
 		),
-		option:       modeOption,
-		spanArrayBuf: make([]*tables.Span, 0, modeOption.maxBatchLen),
-		lock:         sync.Mutex{},
+		option:             modeOption,
+		spanArrayBuf:       make([]*tables.Span, 0, modeOption.maxBatchLen),
+		lock:               sync.Mutex{},
+		resetFlushTimeChan: make(chan bool),
 	}
 	go s.processQueue()
 	return s
@@ -81,6 +83,8 @@ func (s *SpanWriter) processQueue() {
 		select {
 		case <-timer.C:
 			s.Flush()
+		case <-s.resetFlushTimeChan:
+			timer = time.NewTicker(s.option.bufferFlushInterval)
 		}
 	}
 }
@@ -179,6 +183,7 @@ func (s *SpanWriter) createPartitionTable(startTime time.Time) error {
 	return nil
 }
 func (s *SpanWriter) Flush() error {
+	s.resetFlushTimeChan <- true
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	start := time.Now()
