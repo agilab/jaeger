@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bwmarrin/snowflake"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/pkg/testutils"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/id_mapping"
@@ -30,7 +29,6 @@ func Benchmark_SpanWriter_WriteSpan(b *testing.B) {
 		maxBatchLen:         5000,
 		bufferFlushInterval: time.Second,
 	})
-	node, _ := snowflake.NewNode(1)
 	logs := make([]model.Log, 0)
 	log.Println(time.Now().Format("2006-01-02T15:04:05Z07:00"))
 	json.Unmarshal([]byte(`[{
@@ -61,7 +59,6 @@ func Benchmark_SpanWriter_WriteSpan(b *testing.B) {
 	mSpan := &model.Span{
 		Process:       model.NewProcess("tesla_keyword_be", nil),
 		TraceID:       model.TraceID{Low: 0x49e0e6d56552289b, High: 0},
-		SpanID:        model.SpanID(node.Generate().Int64()),
 		ParentSpanID:  model.SpanID(0x49e0e6d56552289b),
 		Flags:         1,
 		OperationName: "SQL SELECT base_keywords",
