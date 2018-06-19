@@ -20,6 +20,7 @@ import (
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/pgutil"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/tables"
 	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
+	"github.com/json-iterator/go"
 	"github.com/uber/jaeger-lib/metrics"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -40,18 +41,19 @@ type SpanWriter struct {
 	writerMetrics      spanWriterMetrics // TODO: build functions to wrap around each Do fn
 	idMappingService   id_mapping.IDMappingService
 	tableCache         cache.Cache
-	option             writerOption
+	option             WriterOption
 	spanArrayBuf       []*tables.Span
 	arrayBufLen        *atomic.Int64
 	lock               sync.Mutex
 	resetFlushTimeChan chan bool
 }
 
+
 func NewSpanWriter(
 	db *pg.DB,
 	logger *zap.Logger,
 	metricsFactory metrics.Factory,
-	modeOption writerOption,
+	modeOption WriterOption,
 ) *SpanWriter {
 	ctx := context.Background()
 	s := &SpanWriter{
@@ -69,7 +71,7 @@ func NewSpanWriter(
 			},
 		),
 		option:             modeOption,
-		spanArrayBuf:       make([]*tables.Span, 0, modeOption.maxBatchLen),
+		spanArrayBuf:       make([]*tables.Span, 0, modeOption.MaxBatchLen),
 		lock:               sync.Mutex{},
 		resetFlushTimeChan: make(chan bool),
 	}
@@ -78,13 +80,13 @@ func NewSpanWriter(
 }
 
 func (s *SpanWriter) processQueue() {
-	timer := time.NewTicker(s.option.bufferFlushInterval)
+	timer := time.NewTicker(s.option.BufferFlushInterval)
 	for {
 		select {
 		case <-timer.C:
 			s.Flush()
 		case <-s.resetFlushTimeChan:
-			timer = time.NewTicker(s.option.bufferFlushInterval)
+			timer = time.NewTicker(s.option.BufferFlushInterval)
 		}
 	}
 }
@@ -102,7 +104,7 @@ func (s *SpanWriter) WriteSpan(span *model.Span) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.spanArrayBuf = append(s.spanArrayBuf, tSpan)
-	if len(s.spanArrayBuf) >= s.option.maxBatchLen {
+	if len(s.spanArrayBuf) >= s.option.MaxBatchLen {
 		s.flush()
 	}
 	return nil
@@ -111,17 +113,25 @@ func (s *SpanWriter) WriteSpan(span *model.Span) error {
 func (s *SpanWriter) transportFromLogTag(span *model.Span) (request string, userId int64) {
 	for _, log := range span.Logs {
 		for _, field := range log.Fields {
-			if field.Key == s.option.requestLogKey {
+			if field.Key == s.option.RequestLogKey {
 				request = field.AsString()
 			}
 		}
 	}
 	for _, tag := range span.Tags {
-		if tag.Key == s.option.userIdTagKey {
+		if tag.Key == s.option.UserIdTagKey {
 			userId = tag.Int64()
 		}
 	}
 	return
+}
+
+func toJsonString(v interface{}) string {
+	b, err := jsoniter.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span, error) {
@@ -135,7 +145,7 @@ func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span,
 	tSpan.StartTime = &utcTime
 	tSpan.Duration = span.Duration.Nanoseconds()
 	tSpan.Tags = buildTags2Map(span.Tags)
-	tSpan.Logs = span.Logs
+	tSpan.Logs = toJsonString(span.Logs)
 	tSpan.Flags = int64(span.Flags)
 	tSpan.Warnings = span.Warnings
 	tips := strings.SplitN(span.OperationName, " ", 2)
@@ -157,7 +167,7 @@ func (s *SpanWriter) transportJaegerSpan2PgSpan(span *model.Span) (*tables.Span,
 		tSpan.ParentOperatorIds = append(tSpan.ParentOperatorIds, opId)
 	}
 	tSpan.Process = buildTags2Map(span.Process.Tags)
-	tSpan.Reference = span.References
+	tSpan.Reference = toJsonString(span.References)
 	s.idMappingService.RegisterIDRelation(tSpan.ServiceID, tSpan.OperatorTypeID, tSpan.OperatorID)
 	return tSpan, nil
 }
@@ -194,8 +204,7 @@ func (s *SpanWriter) flush() error {
 	if count == 0 {
 		return nil
 	}
-	result, err := s.db.Model(&s.spanArrayBuf).Insert(&s.spanArrayBuf)
-	log.Println("result", result, err)
+	_, err := s.db.Model(&s.spanArrayBuf).Insert(&s.spanArrayBuf)
 	s.spanArrayBuf = s.spanArrayBuf[:0]
 	s.writerMetrics.spanInsert.Emit(err, time.Since(start))
 	return err

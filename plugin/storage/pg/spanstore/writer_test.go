@@ -22,12 +22,12 @@ func Benchmark_SpanWriter_WriteSpan(b *testing.B) {
 	db := pgtestutils.NewDB()
 	logger, _ := testutils.NewLogger()
 	id_mapping.InitAndGetIDMappingService(db)
-	spanWriter := NewSpanWriter(db, logger, metrics.NullFactory, writerOption{
-		requestLogKey:       "request",
-		responseLogKey:      "response",
-		userIdTagKey:        "user.id",
-		maxBatchLen:         5000,
-		bufferFlushInterval: time.Second,
+	spanWriter := NewSpanWriter(db, logger, metrics.NullFactory, WriterOption{
+		RequestLogKey:       "request",
+		ResponseLogKey:      "response",
+		UserIdTagKey:        "user.id",
+		MaxBatchLen:         5000,
+		BufferFlushInterval: time.Second,
 	})
 	logs := make([]model.Log, 0)
 	log.Println(time.Now().Format("2006-01-02T15:04:05Z07:00"))

@@ -29,12 +29,14 @@ import (
 	"github.com/jaegertracing/jaeger/storage"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
+	"github.com/go-pg/pg"
 )
 
 const (
 	cassandraStorageType     = "cassandra"
 	elasticsearchStorageType = "elasticsearch"
 	memoryStorageType        = "memory"
+	postgresqlType           = "postgresql"
 )
 
 var allStorageTypes = []string{cassandraStorageType, elasticsearchStorageType, memoryStorageType}

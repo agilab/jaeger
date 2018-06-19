@@ -2,8 +2,6 @@ package tables
 
 import (
 	"time"
-
-	"github.com/jaegertracing/jaeger/model"
 )
 
 /*
@@ -23,9 +21,9 @@ type Span struct {
 	StartTime         *time.Time
 	Duration          int64
 	Tags              map[string]interface{}
-	Logs              []model.Log `pg:",array"`
+	Logs              string
 	Process           map[string]interface{}
-	Reference         []model.SpanRef `pg:",array"`
+	Reference         string
 	Warnings          []string `pg:",array"`
 	UserID            int64
 	Response          string

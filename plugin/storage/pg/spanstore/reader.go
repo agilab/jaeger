@@ -7,6 +7,8 @@ import (
 
 	"strings"
 
+	"encoding/json"
+
 	"github.com/go-pg/pg"
 	"github.com/jaegertracing/jaeger/model"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/id_mapping"
@@ -48,7 +50,7 @@ func (s SpanReader) transportPgSpan2JaegerSpan(tSpan *tables.Span) *model.Span {
 	span.StartTime = *tSpan.StartTime
 	span.Duration = time.Duration(tSpan.Duration)
 	span.Tags = buildMap2Tags(tSpan.Tags)
-	span.Logs = tSpan.Logs
+	json.Unmarshal([]byte(tSpan.Logs), &span.Logs)
 	span.Flags = model.Flags(tSpan.Flags)
 	span.Warnings = tSpan.Warnings
 	span.OperationName = s.idMappingService.GetNameFromId(tSpan.OperatorTypeID, tables.OpMetaTypeEnum.OpType) +
