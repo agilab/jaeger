@@ -14,6 +14,9 @@ import (
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/id_mapping"
 	"github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore/tables"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
+	storageMetrics "github.com/jaegertracing/jaeger/storage/spanstore/metrics"
+	"github.com/uber/jaeger-lib/metrics"
+	"go.uber.org/zap"
 )
 
 /*
@@ -24,6 +27,29 @@ type SpanReader struct {
 	ctx              context.Context
 	db               *pg.DB
 	idMappingService id_mapping.IDMappingService
+	logger           *zap.Logger
+	maxLookback      time.Duration
+}
+
+func NewSpanReader(db *pg.DB,
+	logger *zap.Logger,
+	maxLookback time.Duration,
+	metricsFactory metrics.Factory) spanstore.Reader {
+
+	return storageMetrics.NewReadMetricsDecorator(newSpanReader(db, logger, maxLookback), metricsFactory)
+}
+
+func newSpanReader(db *pg.DB, logger *zap.Logger, maxLookback time.Duration) *SpanReader {
+	ctx := context.Background()
+	rd := &SpanReader{
+		ctx:              ctx,
+		db:               db,
+		logger:           logger,
+		maxLookback:      maxLookback,
+		idMappingService: nil, // the decorator takes care of metrics
+	}
+	rd.idMappingService = id_mapping.InitAndGetIDMappingService(rd.db)
+	return rd
 }
 
 func (s SpanReader) GetTrace(traceID model.TraceID) (*model.Trace, error) {

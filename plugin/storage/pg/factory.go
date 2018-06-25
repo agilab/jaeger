@@ -4,8 +4,10 @@ import (
 	"flag"
 	"time"
 
-	"github.com/go-pg/pg"
+	gopg "github.com/go-pg/pg"
+	"github.com/jaegertracing/jaeger/pkg/pg"
 	"github.com/jaegertracing/jaeger/pkg/testutils"
+	pgDepStore "github.com/jaegertracing/jaeger/plugin/storage/pg/dependencystore"
 	pgSpanStore "github.com/jaegertracing/jaeger/plugin/storage/pg/spanstore"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
@@ -28,32 +30,49 @@ type FactoryOption struct {
 
 // Factory implements storage.Factory for Elasticsearch backend.
 type Factory struct {
-	db             *pg.DB
+	Options        *Options
+	db             pg.DB
 	metricsFactory metrics.Factory
 	logger         *zap.Logger
 }
 
-func (f Factory) AddFlags(flagSet *flag.FlagSet) {
-	panic("implement me")
+func NewFactory() *Factory {
+	return &Factory{
+		Options: NewOption("pg"),
+	}
 }
 
-func (f Factory) InitFromViper(v *viper.Viper) {
-	panic("implement me")
+func (f *Factory) AddFlags(flagSet *flag.FlagSet) {
+	f.Options.AddFlags(flagSet)
 }
 
-func (f Factory) Initialize(metricsFactory metrics.Factory, logger *zap.Logger) error {
+func (f *Factory) InitFromViper(v *viper.Viper) {
+	f.Options.InitFromViper(v)
+
+}
+
+func (f *Factory) Initialize(metricsFactory metrics.Factory, logger *zap.Logger) error {
 	f.metricsFactory = metricsFactory
 	f.logger = logger
+	db, err := f.Options.primary.NewClient(logger, metricsFactory)
+	if err != nil {
+		return err
+	}
+	f.db = db
 	return nil
 }
 
-func (Factory) CreateSpanReader() (spanstore.Reader, error) {
-	panic("implement me")
+func (f *Factory) CreateSpanReader() (spanstore.Reader, error) {
+	db := f.db.(*gopg.DB)
+	spanReader := pgSpanStore.NewSpanReader(db, f.logger, 0, f.metricsFactory)
+
+	return spanReader, nil
 }
 
-func (f Factory) CreateSpanWriter() (spanstore.Writer, error) {
+func (f *Factory) CreateSpanWriter() (spanstore.Writer, error) {
 	logger, _ := testutils.NewLogger()
-	spanWriter := pgSpanStore.NewSpanWriter(f.db, logger, f.metricsFactory, pgSpanStore.WriterOption{
+	db := f.db.(*gopg.DB)
+	spanWriter := pgSpanStore.NewSpanWriter(db, logger, f.metricsFactory, pgSpanStore.WriterOption{
 		RequestLogKey:       "request",
 		ResponseLogKey:      "response",
 		UserIdTagKey:        "user.id",
@@ -63,6 +82,7 @@ func (f Factory) CreateSpanWriter() (spanstore.Writer, error) {
 	return spanWriter, nil
 }
 
-func (Factory) CreateDependencyReader() (dependencystore.Reader, error) {
-	panic("implement me")
+func (f *Factory) CreateDependencyReader() (dependencystore.Reader, error) {
+	db := f.db.(*gopg.DB)
+	return pgDepStore.NewDependencyStore(db, f.logger), nil
 }

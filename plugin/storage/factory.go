@@ -26,10 +26,10 @@ import (
 	"github.com/jaegertracing/jaeger/plugin/storage/cassandra"
 	"github.com/jaegertracing/jaeger/plugin/storage/es"
 	"github.com/jaegertracing/jaeger/plugin/storage/memory"
+	"github.com/jaegertracing/jaeger/plugin/storage/pg"
 	"github.com/jaegertracing/jaeger/storage"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
-	"github.com/go-pg/pg"
 )
 
 const (
@@ -74,6 +74,8 @@ func (f *Factory) getFactoryOfType(factoryType string) (storage.Factory, error) 
 		return es.NewFactory(), nil
 	case memoryStorageType:
 		return memory.NewFactory(), nil
+	case postgresqlType:
+		return pg.NewFactory(), nil
 	default:
 		return nil, fmt.Errorf("Unknown storage type %s. Valid types are %v", factoryType, allStorageTypes)
 	}
