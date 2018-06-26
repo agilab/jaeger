@@ -48,7 +48,6 @@ func (f *Factory) AddFlags(flagSet *flag.FlagSet) {
 
 func (f *Factory) InitFromViper(v *viper.Viper) {
 	f.Options.InitFromViper(v)
-
 }
 
 func (f *Factory) Initialize(metricsFactory metrics.Factory, logger *zap.Logger) error {
